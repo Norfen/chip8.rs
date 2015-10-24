@@ -5,7 +5,10 @@ use std::fs::File;
 use std::num::wrapping::OverflowingOps;
 use std::thread::sleep_ms;
 
-trait ByteManip {
+#[cfg(test)]
+mod tests;
+
+pub trait ByteManip {
     fn high_byte(&self) -> u8;
     fn low_byte(&self) -> u8;
     fn nibble(&self, position: u8) -> u8;
@@ -47,79 +50,6 @@ impl ByteManip for u16 {
     }
 }
 
-#[test]
-fn bitmanip_high() {
-    assert_eq!(0xABCD.high_byte(), 0xAB);
-}
-
-#[test]
-fn bitmanip_low() {
-    assert_eq!(0xABCD.low_byte(), 0xCD);
-}
-
-#[test]
-fn bitmanip_nibble() {
-    let n = 0xABCD;
-    assert_eq!(n.nibble(1), 0xA);
-    assert_eq!(n.nibble(2), 0xB);
-    assert_eq!(n.nibble(3), 0xC);
-    assert_eq!(n.nibble(4), 0xD);
-}
-
-#[test]
-fn memset(c: &mut Chip8, location: usize, values: &[u16]) {
-    for (ind, mem) in values.iter().enumerate() {
-        c.memory[location + ind * 2] = (mem >> 8) as u8;
-        c.memory[location + (ind * 2) + 1] = (mem & 0x00FF) as u8;
-    }
-}
-
-#[test]
-fn chip8test() {
-    let mut c = Chip8::init();
-    assert_eq!(c.pc, 0x200);
-    memset(&mut c, 0x200, &[0x1204]); //jump to 0x204
-    c.reginfo();
-    c.step(); //0x200
-    c.reginfo();
-    assert_eq!(c.pc, 0x204);
-    memset(&mut c, 0x190, &[0x6C0F, 0x3C0F, 0x0000, 0x00EE]); //load 0xF into V0, skip next instruction (0x0000) if V0 == 0xF, return from function.
-    memset(&mut c, 0x204, &[0x2190]); //call function at 0x190
-    c.step(); //0x204
-    c.reginfo();
-    assert_eq!(c.pc, 0x190);
-    assert_eq!(c.sp, 15);
-    assert_eq!(c.stack[15], 0x204);
-    c.step(); //0x190
-    c.reginfo();
-    assert_eq!(c.V[0xC], 0xF);
-    c.step(); //0x192: will panic with invalid instruction 0x0000 if this instruction fails
-    c.reginfo();
-    c.step(); //0x196
-    assert_eq!(c.sp, 16);
-    assert_eq!(c.pc, 0x206);
-}
-
-#[test]
-fn chip8drawtest() {
-    let mut c = Chip8::init();
-    memset(&mut c,
-           0x200,
-           &[0x6003, 0xF029, 0xD125, 0x00E0, 0x600A, 0xF029, 0xD125]);
-    c.step(); //0x6003
-    assert_eq!(c.V[0], 0x3);
-    c.step(); //0xF029
-    assert_eq!(c.I, 0xF);
-    c.step(); //0xD125
-    c.dumpgfx();
-    c.step(); //0x00E0
-    c.step(); //0x600A
-    c.step(); //0xF029
-    c.step(); //0xD125
-    c.dumpgfx();
-    assert!(!c.draw_flag);
-}
-
 const FONTSET: [u8; 80] = [0xF0, 0x90, 0x90, 0x90, 0xF0 /* 0 */, 0x20, 0x60, 0x20, 0x20,
                            0x70 /* 1 */, 0xF0, 0x10, 0xF0, 0x80, 0xF0 /* 2 */, 0xF0,
                            0x10, 0xF0, 0x10, 0xF0 /* 3 */, 0x90, 0x90, 0xF0, 0x10,
@@ -133,22 +63,26 @@ const FONTSET: [u8; 80] = [0xF0, 0x90, 0x90, 0x90, 0xF0 /* 0 */, 0x20, 0x60, 0x2
                            0x80, 0xF0, 0x80, 0x80 /* F */];
 
 pub struct Chip8 {
+    // 0x000-0x1FF - Chip 8 interpreter (contains font set in emu)
+    // 0x050-0x0A0 - Used for the built in 4x5 pixel font set (0-F)
+    // 0x200-0xFFF - Program ROM and work RAM
     memory: [u8; 4096],
-    pub gfx: [bool; 2048], // graphics memory
-    draw_flag: bool, /* when true, update screen. Set by instructions 0x00E0 (clear screen) and 0xDXYN
-                      * (draw sprite) */
+
+    // graphics memory
+    pub gfx: [bool; 2048],
+    /* when true, update screen. Set by instructions 0x00E0 (clear screen) and
+     * 0xDXYN (draw sprite) */
+    pub draw_flag: bool, 
 
     // All registers GP
     // V[0xF] is a carry flag
     V: [u8; 16], // registers
     I: u16, // indexing register
 
-    // 0x000-0x1FF - Chip 8 interpreter (contains font set in emu)
-    // 0x050-0x0A0 - Used for the built in 4x5 pixel font set (0-F)
-    // 0x200-0xFFF - Program ROM and work RAM
     pc: u16, // program counter
 
-    delay_timer: u8, // must count down at 60Hz
+    // counts down at 60Hz
+    delay_timer: u8,
     sound_timer: u8,
 
     stack: [u16; 16], // 16 level stack
@@ -159,7 +93,7 @@ pub struct Chip8 {
     // 4 5 6 D
     // 7 8 9 E
     // A 0 B F
-    // use SDL and map keys to
+    // Map keys to
     // 1 2 3 4
     // q w e r
     // a s d f
@@ -401,18 +335,18 @@ impl Chip8 {
                 // Sprites are 8 bits wide. Wraps around the screen. If drawing clears a pixel,
                 // VF is set to TRUE.
                 // Draws at position VX, VY, N rows high
-                let x = self.V[op.x()] as u16;
-                let y = self.V[op.y()] as u16;
-                let h = op & 0x000F as u16;
+                let x = self.V[op.x()] as u32;
+                let y = self.V[op.y()] as u32;
+                let h = (op & 0x000F) as u32;
                 let mut p: u8;
                 let mut flag = false;
 
                 self.V[15] = 0;
                 for yline in 0..h {
-                    p = self.memory[(self.I + yline) as usize];
+                    p = self.memory[(self.I as u32 + yline) as usize];
                     for xline in 0..8 {
-                        let pos = (x + xline + ((y + yline) * 64)) as usize;
-                        if pos < 2048 && (p & (0x80 >> xline)) != 0 {
+                        let pos = ((x + xline + ((y + yline) * 64)) % 2048) as usize;
+                        if (p & (0x80 >> xline)) != 0 {
                             if !flag && self.gfx[pos] {
                                 self.V[15] = 1;
                                 flag = true;
@@ -533,7 +467,6 @@ impl Chip8 {
 
     pub fn update_keys(&mut self, key: u8, pressed: bool) {
         self.key[key as usize] = pressed;
-        // println!("key {} pressed: {}", key, pressed);
     }
 
     fn unknown_opcode_panic(&mut self) {

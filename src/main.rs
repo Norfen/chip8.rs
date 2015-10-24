@@ -17,7 +17,6 @@ use piston::input::*;
 use piston::event_loop::*;
 use sdl2_window::Sdl2Window;
 use opengl_graphics::{GlGraphics, OpenGL};
-
 use docopt::Docopt;
 
 mod chip8;
@@ -60,7 +59,13 @@ fn main() {
     let mut app = app::App::init(GlGraphics::new(opengl),
                                  String::from(args.arg_filename.clone()),
                                  match args.flag_speed {
-                                     Some(clock) => clock,
+                                     Some(clock) => {
+                                     	if clock % 60 == 0 {
+                                     		clock
+                                     	} else {
+                                     		panic!("Clock speed {} is not divisible by 60, desync will occur.", clock);
+                                     	}
+                                     },
                                      None => 120,
                                  },
                                  match args.flag_foreground {

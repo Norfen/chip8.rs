@@ -31,10 +31,10 @@ pub struct App {
     gl: GlGraphics,
     c8: Chip8,
     ticker: f64,
-    fpscounter: FPSCounter,
-    upscounter: FPSCounter,
+    fps_counter: FPSCounter,
+    clock_counter: FPSCounter,
     lastfps: usize,
-    lastups: usize,
+    lasthz: usize,
     clockspeed: i32,
     background_color: RGBA,
     foreground_color: RGBA,
@@ -51,10 +51,10 @@ impl App {
             gl: gl,
             c8: Chip8::init(),
             ticker: 0.0,
-            fpscounter: FPSCounter::new(),
-            upscounter: FPSCounter::new(),
+            fps_counter: FPSCounter::new(),
+            clock_counter: FPSCounter::new(),
             lastfps: 0,
-            lastups: 0,
+            lasthz: 0,
             clockspeed: clock,
             foreground_color: RGBA::from_u8(foreground),
             background_color: RGBA::from_u8(background),
@@ -70,47 +70,52 @@ impl App {
     }
 
     pub fn render(&mut self, args: &RenderArgs) {
-        use graphics::*;
+        if self.c8.draw_flag {
+            use graphics::*;
 
-        let w = args.width;
-        let pixelsize = (w as f64) / 64.0;
+            let w = args.width;
+            let pixelsize = (w as f64) / 64.0;
 
-        let gfxbuffer = &self.c8.gfx;
+            let gfxbuffer = &self.c8.gfx;
 
-        let foreground = self.foreground_color;
-        let background = self.background_color;
-        let pixel = rectangle::square(0.0, 0.0, pixelsize);
+            let foreground = self.foreground_color;
+            let background = self.background_color;
+            let pixel = rectangle::square(0.0, 0.0, pixelsize);
 
-        self.gl.draw(args.viewport(), |c, gl| {
-            clear(background, gl);
+            self.gl.draw(args.viewport(), |c, gl| {
+                clear(background, gl);
 
-            for y in 0..32 {
-                for x in 0..64 {
-                    rectangle(if gfxbuffer[((y * 64) + x) as usize] {
-                                  foreground
-                              } else {
-                                  background
-                              },
-                              pixel,
-                              c.transform.trans((x as f64) * pixelsize, (y as f64) * pixelsize),
-                              gl)
+                for y in 0..32 {
+                    for x in 0..64 {
+                        rectangle(if gfxbuffer[((y * 64) + x) as usize] {
+                                      foreground
+                                  } else {
+                                      background
+                                  },
+                                  pixel,
+                                  c.transform.trans((x as f64) * pixelsize, (y as f64) * pixelsize),
+                                  gl)
+                    }
                 }
-            }
-        });
-        self.lastfps = self.fpscounter.tick();
+            });
+            self.c8.draw_flag = false;
+        }
+        self.lastfps = self.fps_counter.tick();
     }
 
     pub fn update(&mut self, args: &UpdateArgs) {
         self.ticker += args.dt;
         while self.ticker > 1.0 / 60.0 {
             self.c8.tick();
-            self.ticker -= 1.0 / 60.0
+            self.ticker -= 1.0 / 60.0;
         }
         for _ in 0..(((self.clockspeed as f64) * args.dt).round() as usize) {
             self.c8.step();
+            self.lasthz = self.clock_counter.tick();
         }
-        // self.c8.reginfo();
-        self.lastups = self.upscounter.tick();
+        if ((self.lasthz as f64) * 0.05) + (self.lasthz as f64) < (self.clockspeed as f64) || (self.lasthz as f64) - ((self.lasthz as f64) * 0.05) > (self.clockspeed as f64) {
+        	println!("CPU is out of sync: {}Hz", self.lasthz);
+        }
     }
 
     pub fn keypress(&mut self, args: &Button) {
