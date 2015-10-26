@@ -2,6 +2,8 @@ use fps_counter::FPSCounter;
 use graphics::*;
 use opengl_graphics::GlGraphics;
 use piston::input::*;
+use sound_stream::{CallbackFlags, CallbackResult, SoundStream, Settings, StreamParams};
+use sound_stream::output::NonBlockingStream;
 
 use chip8::Chip8;
 
@@ -14,17 +16,25 @@ trait RGBATrait {
 }
 
 impl RGBATrait for RGBA {
+    #[inline]
     fn rgba(r: f32, g: f32, b: f32, a: f32) -> RGBA {
         [r, g, b, a]
     }
 
+    #[inline]
     fn rgb(r: f32, g: f32, b: f32) -> RGBA {
         [r, g, b, 1.0]
     }
 
+    #[inline]
     fn from_u8(xs: [u8; 4]) -> RGBA {
         [xs[0] as f32 / 255.0, xs[1] as f32 / 255.0, xs[2] as f32 / 255.0, xs[3] as f32 / 255.0]
     }
+}
+
+#[inline]
+fn square_wave(phase: f64) -> f32 {
+    ((phase * ::std::f64::consts::PI * 2.0).sin().signum() * 0.25) as f32
 }
 
 pub struct App {
@@ -38,6 +48,7 @@ pub struct App {
     clockspeed: i32,
     background_color: RGBA,
     foreground_color: RGBA,
+    sound: Option<NonBlockingStream>,
 }
 
 impl App {
@@ -58,6 +69,7 @@ impl App {
             clockspeed: clock,
             foreground_color: RGBA::from_u8(foreground),
             background_color: RGBA::from_u8(background),
+            sound: None,
         };
         temp.c8.load_program(program_file);
         temp
@@ -77,7 +89,7 @@ impl App {
 
             let gfxbuffer = &self.c8.gfx;
             let (memwidth, memheight) = self.c8.screen_dimens();
-            let pixelsize = (w as f64) / (memwidth as f64);         
+            let pixelsize = (w as f64) / (memwidth as f64);
 
             let foreground = self.foreground_color;
             let background = self.background_color;
@@ -110,19 +122,51 @@ impl App {
             self.c8.tick();
             self.ticker -= 1.0 / 60.0;
         }
+        if self.c8.sound_timer > 0 && self.sound.is_none() {
+            let mut timer = self.c8.sound_timer as f64 * (1.0 / 60.0);
+            let mut phase = 0.0;
+            self.sound = Some(SoundStream::new()
+                                  .output(StreamParams::new())
+                                  .run_callback(Box::new(move |output: &mut [f32],
+                                                               settings: Settings,
+                                                               dt: f64,
+                                                               _: CallbackFlags| {
+                                      for frame in output.chunks_mut(settings.channels as usize) {
+                                          let snd = square_wave(phase);
+                                          for channel in frame {
+                                              *channel = snd;
+                                          }
+                                          phase += 200.0 / settings.sample_hz as f64;
+                                      }
+                                      timer -= dt;
+                                      if timer >= 0.0 {
+                                          CallbackResult::Continue
+                                      } else {
+                                          CallbackResult::Complete
+                                      }
+                                  }))
+                                  .unwrap());
+        }
+        if self.sound.as_ref().map_or(false, |s| s.is_active().as_ref().ok() == Some(&false)) {
+            self.sound = None;
+        }
         for _ in 0..(((self.clockspeed as f64) * args.dt).round() as usize) {
             self.c8.step();
             self.lasthz = self.clock_counter.tick();
         }
-        // if ((self.lasthz as f64) * 0.05) + (self.lasthz as f64) < (self.clockspeed as f64) || (self.lasthz as f64) - ((self.lasthz as f64) * 0.05) > (self.clockspeed as f64) {
+        // if ((self.lasthz as f64) * 0.05) + (self.lasthz as f64) < (self.clockspeed
+        // as f64) || (self.lasthz as f64) - ((self.lasthz as f64) * 0.05) >
+        // (self.clockspeed as f64) {
         // 	println!("CPU is out of sync: {}Hz", self.lasthz);
         // }
     }
 
+    #[inline]
     pub fn keypress(&mut self, args: &Button) {
         self.handle_keys(args, true);
     }
 
+    #[inline]
     pub fn unkeypress(&mut self, args: &Button) {
         self.handle_keys(args, false);
     }

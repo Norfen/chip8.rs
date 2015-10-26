@@ -12,6 +12,7 @@ extern crate fps_counter;
 extern crate read_color;
 extern crate rustc_serialize;
 extern crate docopt;
+extern crate sound_stream;
 
 use piston::window::WindowSettings;
 use piston::input::*;
@@ -52,12 +53,14 @@ fn main() {
                                  String::from(args.arg_filename.clone()),
                                  match args.flag_speed {
                                      Some(clock) => {
-                                     	if clock % 60 == 0 {
-                                     		clock
-                                     	} else {
-                                     		panic!("Clock speed {} is not divisible by 60, desync will occur.", clock);
-                                     	}
-                                     },
+                                         if clock % 60 == 0 {
+                                             clock
+                                         } else {
+                                             panic!("Clock speed {} is not divisible by 60, \
+                                                     desync will occur.",
+                                                    clock);
+                                         }
+                                     }
                                      None => 120,
                                  },
                                  match args.flag_foreground {

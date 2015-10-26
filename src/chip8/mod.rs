@@ -1,5 +1,4 @@
 extern crate rand;
-extern crate arrayref;
 
 use std::io::*;
 use std::fs::File;
@@ -10,34 +9,29 @@ use std::ptr;
 #[cfg(test)]
 mod tests;
 
-const FONTSET: [u8; 80] = [0xF0, 0x90, 0x90, 0x90, 0xF0 /* 0 */, 0x20, 0x60, 0x20, 0x20,
-                           0x70 /* 1 */, 0xF0, 0x10, 0xF0, 0x80, 0xF0 /* 2 */, 0xF0,
-                           0x10, 0xF0, 0x10, 0xF0 /* 3 */, 0x90, 0x90, 0xF0, 0x10,
-                           0x10 /* 4 */, 0xF0, 0x80, 0xF0, 0x10, 0xF0 /* 5 */, 0xF0,
-                           0x80, 0xF0, 0x90, 0xF0 /* 6 */, 0xF0, 0x10, 0x20, 0x40,
-                           0x40 /* 7 */, 0xF0, 0x90, 0xF0, 0x90, 0xF0 /* 8 */, 0xF0,
-                           0x90, 0xF0, 0x10, 0xF0 /* 9 */, 0xF0, 0x90, 0xF0, 0x90,
-                           0x90 /* A */, 0xE0, 0x90, 0xE0, 0x90, 0xE0 /* B */, 0xF0,
-                           0x80, 0x80, 0x80, 0xF0 /* C */, 0xE0, 0x90, 0x90, 0x90,
-                           0xE0 /* D */, 0xF0, 0x80, 0xF0, 0x80, 0xF0 /* E */, 0xF0,
-                           0x80, 0xF0, 0x80, 0x80 /* F */];
+const FONTSET: [u8; 80] = [0xF0, 0x90, 0x90, 0x90, 0xF0, 0x20, 0x60, 0x20, 0x20, 0x70, 0xF0, 0x10,
+                           0xF0, 0x80, 0xF0, 0xF0, 0x10, 0xF0, 0x10, 0xF0, 0x90, 0x90, 0xF0, 0x10,
+                           0x10, 0xF0, 0x80, 0xF0, 0x10, 0xF0, 0xF0, 0x80, 0xF0, 0x90, 0xF0, 0xF0,
+                           0x10, 0x20, 0x40, 0x40, 0xF0, 0x90, 0xF0, 0x90, 0xF0, 0xF0, 0x90, 0xF0,
+                           0x10, 0xF0, 0xF0, 0x90, 0xF0, 0x90, 0x90, 0xE0, 0x90, 0xE0, 0x90, 0xE0,
+                           0xF0, 0x80, 0x80, 0x80, 0xF0, 0xE0, 0x90, 0x90, 0x90, 0xE0, 0xF0, 0x80,
+                           0xF0, 0x80, 0xF0, 0xF0, 0x80, 0xF0, 0x80, 0x80];
 
-const SFONTSET: [u8; 160] = [0xF0, 0xF0, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0xF0, 0xF0 /* 0 */,
-                             0x20, 0x20, 0x60, 0x60, 0x20, 0x20, 0x20, 0x20, 0x70, 0x70 /* 1 */,
-                             0xF0, 0xF0, 0x10, 0x10, 0xF0, 0xF0, 0x80, 0x80, 0xF0, 0xF0 /* 2 */,
-                             0xF0, 0xF0, 0x10, 0x10, 0xF0, 0xF0, 0x10, 0x10, 0xF0, 0xF0 /* 3 */,
-                             0x90, 0x90, 0x90, 0x90, 0xF0, 0xF0, 0x10, 0x10, 0x10, 0x10 /* 4 */,
-                             0xF0, 0xF0, 0x80, 0x80, 0xF0, 0xF0, 0x10, 0x10, 0xF0, 0xF0 /* 5 */,
-                             0xF0, 0xF0, 0x80, 0x80, 0xF0, 0xF0, 0x90, 0x90, 0xF0, 0xF0 /* 6 */,
-                             0xF0, 0xF0, 0x10, 0x10, 0x20, 0x20, 0x40, 0x40, 0x40, 0x40 /* 7 */,
-                             0xF0, 0xF0, 0x90, 0x90, 0xF0, 0xF0, 0x90, 0x90, 0xF0, 0xF0 /* 8 */,
-                             0xF0, 0xF0, 0x90, 0x90, 0xF0, 0xF0, 0x10, 0x10, 0xF0, 0xF0 /* 9 */,
-                             0xF0, 0xF0, 0x90, 0x90, 0xF0, 0xF0, 0x90, 0x90, 0x90, 0x90 /* A */,
-                             0xE0, 0xE0, 0x90, 0x90, 0xE0, 0xE0, 0x90, 0x90, 0xE0, 0xE0 /* B */,
-                             0xF0, 0xF0, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0xF0, 0xF0 /* C */,
-                             0xE0, 0xE0, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0xE0, 0xE0 /* D */,
-                             0xF0, 0xF0, 0x80, 0x80, 0xF0, 0xF0, 0x80, 0x80, 0xF0, 0xF0 /* E */,
-                             0xF0, 0xF0, 0x80, 0x80, 0xF0, 0xF0, 0x80, 0x80, 0x80, 0x80];  // F
+const SFONTSET: [u8; 160] = [0xF0, 0xF0, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0xF0, 0xF0, 0x20,
+                             0x20, 0x60, 0x60, 0x20, 0x20, 0x20, 0x20, 0x70, 0x70, 0xF0, 0xF0,
+                             0x10, 0x10, 0xF0, 0xF0, 0x80, 0x80, 0xF0, 0xF0, 0xF0, 0xF0, 0x10,
+                             0x10, 0xF0, 0xF0, 0x10, 0x10, 0xF0, 0xF0, 0x90, 0x90, 0x90, 0x90,
+                             0xF0, 0xF0, 0x10, 0x10, 0x10, 0x10, 0xF0, 0xF0, 0x80, 0x80, 0xF0,
+                             0xF0, 0x10, 0x10, 0xF0, 0xF0, 0xF0, 0xF0, 0x80, 0x80, 0xF0, 0xF0,
+                             0x90, 0x90, 0xF0, 0xF0, 0xF0, 0xF0, 0x10, 0x10, 0x20, 0x20, 0x40,
+                             0x40, 0x40, 0x40, 0xF0, 0xF0, 0x90, 0x90, 0xF0, 0xF0, 0x90, 0x90,
+                             0xF0, 0xF0, 0xF0, 0xF0, 0x90, 0x90, 0xF0, 0xF0, 0x10, 0x10, 0xF0,
+                             0xF0, 0xF0, 0xF0, 0x90, 0x90, 0xF0, 0xF0, 0x90, 0x90, 0x90, 0x90,
+                             0xE0, 0xE0, 0x90, 0x90, 0xE0, 0xE0, 0x90, 0x90, 0xE0, 0xE0, 0xF0,
+                             0xF0, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0xF0, 0xF0, 0xE0, 0xE0,
+                             0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0xE0, 0xE0, 0xF0, 0xF0, 0x80,
+                             0x80, 0xF0, 0xF0, 0x80, 0x80, 0xF0, 0xF0, 0xF0, 0xF0, 0x80, 0x80,
+                             0xF0, 0xF0, 0x80, 0x80, 0x80, 0x80];
 
 pub struct Chip8 {
     // 0x000-0x1FF - Chip 8 interpreter (contains font set in emu)
@@ -59,7 +53,7 @@ pub struct Chip8 {
 
     // counts down at 60Hz
     delay_timer: u8,
-    sound_timer: u8,
+    pub sound_timer: u8,
 
     stack: [u16; 16], // 16 level stack
     sp: u16, // stack pointer
@@ -133,11 +127,11 @@ impl Chip8 {
                         let lines = (op & 0x000F) as usize;
                         let (width, _) = self.screen_dimens();
                         unsafe {
-                            //copy memory lines down
+                            // copy memory lines down
                             ptr::copy(self.gfx.as_ptr(),
                                       self.gfx.as_mut_ptr().offset((width * lines) as isize),
                                       8192 - (width * lines));
-                            //zero out old memory
+                            // zero out old memory
                             ptr::write_bytes::<bool>(self.gfx.as_mut_ptr(), 0, width * lines);
                         }
                         self.draw_flag = true;
@@ -186,16 +180,19 @@ impl Chip8 {
                                 ptr::copy(&self.gfx[(width * i) + scroll],
                                           &mut self.gfx[width * i],
                                           width - scroll);
-                                ptr::write_bytes::<bool>(&mut self.gfx[(width * i) + width - scroll], 0, scroll)
+                                ptr::write_bytes::<bool>(&mut self.gfx[(width * i) + width -
+                                                                       scroll],
+                                                         0,
+                                                         scroll)
                             }
                         }
                         self.draw_flag = true;
                         self.pc += 2;
-                    },
+                    }
                     0x00FD => {
                         // exit interpreter
                         // just hang
-                    },
+                    }
                     0x00FE => {
                         // disable extended screen mode
                         self.extended_mode = false;
@@ -357,7 +354,9 @@ impl Chip8 {
                 }) {
                     let widex = h == 0 && self.extended_mode;
                     let (p, shift) = if widex {
-                        (((self.memory[self.I as usize + yline] as u16) << 8) + self.memory[self.I as usize + yline + 1] as u16, 32768)
+                        (((self.memory[self.I as usize + yline] as u16) << 8) +
+                         self.memory[self.I as usize + yline + 1] as u16,
+                         32768)
                     } else {
                         (self.memory[self.I as usize + yline] as u16, 0b1000_0000)
                     };
@@ -464,8 +463,9 @@ impl Chip8 {
                         for i in 0..op.x() + 1 {
                             self.memory[self.I as usize + i] = self.V[i];
                         }
-                        /* Next line breaks SCStars, but I don't know what not having it breaks. */
-                        // self.I += op.x() as u16 + 1; //happens on the original emulator, on current ones supposedly unchanged
+                        // Next line breaks SCStars, but I don't know what not having it breaks.
+                        // self.I += op.x() as u16 + 1; //happens on the original emulator, on
+                        // current ones supposedly unchanged
                         self.pc += 2;
                     }
                     0xF065 => {
@@ -473,17 +473,18 @@ impl Chip8 {
                         for i in 0..op.x() + 1 {
                             self.V[i] = self.memory[self.I as usize + i];
                         }
-                        /* Next line breaks SCStars, but I don't know what not having it breaks. */
-                        // self.I += op.x() as u16 + 1; //happens on the original emulator, on current ones supposedly unchanged
+                        // Next line breaks SCStars, but I don't know what not having it breaks.
+                        // self.I += op.x() as u16 + 1; //happens on the original emulator, on
+                        // current ones supposedly unchanged
                         self.pc += 2;
-                    },
+                    }
                     0xF075 => {
-                        //store V0 to VX in user flags
+                        // store V0 to VX in user flags
                         for i in 0..op.x() + 1 {
                             self.user_flags[i] = self.V[i];
                         }
                         self.pc += 2;
-                    },
+                    }
                     0xF085 => {
                         // fill V0 to VX from user flags
                         for i in 0..op.x() + 1 {
@@ -498,6 +499,7 @@ impl Chip8 {
         }
     }
 
+    #[inline]
     pub fn tick(&mut self) {
         if self.delay_timer > 0 {
             self.delay_timer -= 1;
@@ -507,6 +509,7 @@ impl Chip8 {
         }
     }
 
+    #[inline]
     pub fn update_keys(&mut self, key: u8, pressed: bool) {
         self.key[key as usize] = pressed;
     }
@@ -572,6 +575,7 @@ impl Chip8 {
     }
 
     // Utils
+    #[inline]
     pub fn screen_dimens(&self) -> (usize, usize) {
         (if self.extended_mode {
             (128, 64)
@@ -592,14 +596,17 @@ pub trait ByteManip {
 }
 
 impl ByteManip for u16 {
+    #[inline]
     fn high_byte(&self) -> u8 {
         (self >> 8) as u8
     }
 
+    #[inline]
     fn low_byte(&self) -> u8 {
         (self & 0x00FF) as u8
     }
 
+    #[inline]
     fn nibble(&self, position: u8) -> u8 {
         match position {
             1 => (self >> 12) as u8,
@@ -610,14 +617,17 @@ impl ByteManip for u16 {
         }
     }
 
+    #[inline]
     fn x(&self) -> usize {
         self.nibble(2) as usize
     }
 
+    #[inline]
     fn y(&self) -> usize {
         self.nibble(3) as usize
     }
 
+    #[inline]
     fn nnn(&self) -> u16 {
         self & 0x0FFF as u16
     }
