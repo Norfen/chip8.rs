@@ -1,7 +1,8 @@
 #![feature(step_by)]
 #![feature(wrapping)]
 #![feature(plugin)]
-// #![plugin(docopt_macros)]
+#![plugin(docopt_macros)]
+#[macro_use]
 
 extern crate piston;
 extern crate graphics;
@@ -17,12 +18,11 @@ use piston::input::*;
 use piston::event_loop::*;
 use sdl2_window::Sdl2Window;
 use opengl_graphics::{GlGraphics, OpenGL};
-use docopt::Docopt;
 
 mod chip8;
 mod app;
 
-const USAGE: &'static str = "
+docopt!(Args derive Debug, "
 Chip8.
 
 Usage:
@@ -34,18 +34,10 @@ Options:
                              --speed=<hz>
 	--foreground=<color>
 	--background=<color>
-";
-
-#[derive(Debug, RustcDecodable)]
-struct Args {
-    arg_filename: String,
-    flag_speed: Option<i32>,
-    flag_foreground: Option<String>,
-    flag_background: Option<String>,
-}
+", flag_foreground: Option<String>, flag_background: Option<String>, flag_speed: Option<i32>);
 
 fn main() {
-    let args: Args = Docopt::new(USAGE).and_then(|d| d.decode()).unwrap_or_else(|e| e.exit());
+    let args: Args = Args::docopt().decode().unwrap_or_else(|e| e.exit());
 
     let opengl = OpenGL::V3_2;
     let window: Sdl2Window = WindowSettings::new("Chip8.rs", [640, 320])

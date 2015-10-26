@@ -74,9 +74,10 @@ impl App {
             use graphics::*;
 
             let w = args.width;
-            let pixelsize = (w as f64) / 64.0;
 
             let gfxbuffer = &self.c8.gfx;
+            let (memwidth, memheight) = self.c8.screen_dimens();
+            let pixelsize = (w as f64) / (memwidth as f64);         
 
             let foreground = self.foreground_color;
             let background = self.background_color;
@@ -85,9 +86,9 @@ impl App {
             self.gl.draw(args.viewport(), |c, gl| {
                 clear(background, gl);
 
-                for y in 0..32 {
-                    for x in 0..64 {
-                        rectangle(if gfxbuffer[((y * 64) + x) as usize] {
+                for y in 0..memheight {
+                    for x in 0..memwidth {
+                        rectangle(if gfxbuffer[((y * memwidth) + x) as usize] {
                                       foreground
                                   } else {
                                       background
@@ -113,9 +114,9 @@ impl App {
             self.c8.step();
             self.lasthz = self.clock_counter.tick();
         }
-        if ((self.lasthz as f64) * 0.05) + (self.lasthz as f64) < (self.clockspeed as f64) || (self.lasthz as f64) - ((self.lasthz as f64) * 0.05) > (self.clockspeed as f64) {
-        	println!("CPU is out of sync: {}Hz", self.lasthz);
-        }
+        // if ((self.lasthz as f64) * 0.05) + (self.lasthz as f64) < (self.clockspeed as f64) || (self.lasthz as f64) - ((self.lasthz as f64) * 0.05) > (self.clockspeed as f64) {
+        // 	println!("CPU is out of sync: {}Hz", self.lasthz);
+        // }
     }
 
     pub fn keypress(&mut self, args: &Button) {

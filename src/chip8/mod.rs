@@ -1,54 +1,14 @@
 extern crate rand;
+extern crate arrayref;
 
 use std::io::*;
 use std::fs::File;
 use std::num::wrapping::OverflowingOps;
 use std::thread::sleep_ms;
+use std::ptr;
 
 #[cfg(test)]
 mod tests;
-
-pub trait ByteManip {
-    fn high_byte(&self) -> u8;
-    fn low_byte(&self) -> u8;
-    fn nibble(&self, position: u8) -> u8;
-
-    fn x(&self) -> usize; //shorthand for the positions of X and Y register indices in Chip8 opcodes
-    fn y(&self) -> usize;
-    fn nnn(&self) -> u16; //shorthand for NNN memory location pattern in opcodes
-}
-
-impl ByteManip for u16 {
-    fn high_byte(&self) -> u8 {
-        (self >> 8) as u8
-    }
-
-    fn low_byte(&self) -> u8 {
-        (self & 0x00FF) as u8
-    }
-
-    fn nibble(&self, position: u8) -> u8 {
-        match position {
-            1 => (self >> 12) as u8,
-            2 => ((self >> 8) & 0x000F as u16) as u8,
-            3 => ((self >> 4) & 0x000F as u16) as u8,
-            4 => (self & 0x000F as u16) as u8,
-            _ => panic!("Out of range nibble position {}", position),
-        }
-    }
-
-    fn x(&self) -> usize {
-        self.nibble(2) as usize
-    }
-
-    fn y(&self) -> usize {
-        self.nibble(3) as usize
-    }
-
-    fn nnn(&self) -> u16 {
-        self & 0x0FFF as u16
-    }
-}
 
 const FONTSET: [u8; 80] = [0xF0, 0x90, 0x90, 0x90, 0xF0 /* 0 */, 0x20, 0x60, 0x20, 0x20,
                            0x70 /* 1 */, 0xF0, 0x10, 0xF0, 0x80, 0xF0 /* 2 */, 0xF0,
@@ -62,17 +22,33 @@ const FONTSET: [u8; 80] = [0xF0, 0x90, 0x90, 0x90, 0xF0 /* 0 */, 0x20, 0x60, 0x2
                            0xE0 /* D */, 0xF0, 0x80, 0xF0, 0x80, 0xF0 /* E */, 0xF0,
                            0x80, 0xF0, 0x80, 0x80 /* F */];
 
+const SFONTSET: [u8; 160] = [0xF0, 0xF0, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0xF0, 0xF0 /* 0 */,
+                             0x20, 0x20, 0x60, 0x60, 0x20, 0x20, 0x20, 0x20, 0x70, 0x70 /* 1 */,
+                             0xF0, 0xF0, 0x10, 0x10, 0xF0, 0xF0, 0x80, 0x80, 0xF0, 0xF0 /* 2 */,
+                             0xF0, 0xF0, 0x10, 0x10, 0xF0, 0xF0, 0x10, 0x10, 0xF0, 0xF0 /* 3 */,
+                             0x90, 0x90, 0x90, 0x90, 0xF0, 0xF0, 0x10, 0x10, 0x10, 0x10 /* 4 */,
+                             0xF0, 0xF0, 0x80, 0x80, 0xF0, 0xF0, 0x10, 0x10, 0xF0, 0xF0 /* 5 */,
+                             0xF0, 0xF0, 0x80, 0x80, 0xF0, 0xF0, 0x90, 0x90, 0xF0, 0xF0 /* 6 */,
+                             0xF0, 0xF0, 0x10, 0x10, 0x20, 0x20, 0x40, 0x40, 0x40, 0x40 /* 7 */,
+                             0xF0, 0xF0, 0x90, 0x90, 0xF0, 0xF0, 0x90, 0x90, 0xF0, 0xF0 /* 8 */,
+                             0xF0, 0xF0, 0x90, 0x90, 0xF0, 0xF0, 0x10, 0x10, 0xF0, 0xF0 /* 9 */,
+                             0xF0, 0xF0, 0x90, 0x90, 0xF0, 0xF0, 0x90, 0x90, 0x90, 0x90 /* A */,
+                             0xE0, 0xE0, 0x90, 0x90, 0xE0, 0xE0, 0x90, 0x90, 0xE0, 0xE0 /* B */,
+                             0xF0, 0xF0, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0xF0, 0xF0 /* C */,
+                             0xE0, 0xE0, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0xE0, 0xE0 /* D */,
+                             0xF0, 0xF0, 0x80, 0x80, 0xF0, 0xF0, 0x80, 0x80, 0xF0, 0xF0 /* E */,
+                             0xF0, 0xF0, 0x80, 0x80, 0xF0, 0xF0, 0x80, 0x80, 0x80, 0x80];  // F
+
 pub struct Chip8 {
     // 0x000-0x1FF - Chip 8 interpreter (contains font set in emu)
-    // 0x050-0x0A0 - Used for the built in 4x5 pixel font set (0-F)
     // 0x200-0xFFF - Program ROM and work RAM
     memory: [u8; 4096],
 
     // graphics memory
-    pub gfx: [bool; 2048],
-    /* when true, update screen. Set by instructions 0x00E0 (clear screen) and
-     * 0xDXYN (draw sprite) */
-    pub draw_flag: bool, 
+    pub gfx: [bool; 8192],
+    // when true, update screen. Set by instructions 0x00E0 (clear screen) and
+    // 0xDXYN (draw sprite)
+    pub draw_flag: bool,
 
     // All registers GP
     // V[0xF] is a carry flag
@@ -99,6 +75,10 @@ pub struct Chip8 {
     // a s d f
     // z x c v
     key: [bool; 16], // keypad
+
+    // SCHIP8 extended mode
+    pub extended_mode: bool,
+    user_flags: [u8; 8],
 }
 
 impl Chip8 {
@@ -106,7 +86,7 @@ impl Chip8 {
     pub fn init() -> Chip8 {
         let mut temp = Chip8 {
             memory: [0; 4096],
-            gfx: [false; 2048],
+            gfx: [false; 8192],
             draw_flag: true,
             V: [0; 16],
             I: 0,
@@ -116,9 +96,15 @@ impl Chip8 {
             stack: [0; 16],
             sp: 16,
             key: [false; 16],
+            extended_mode: false,
+            user_flags: [0; 8],
         };
-        for i in 0..80 {
-            temp.memory[i] = FONTSET[i];
+        for i in 0..240 {
+            temp.memory[i] = if i < 80 {
+                FONTSET[i]
+            } else {
+                SFONTSET[i - 80]
+            }
         }
         temp
     }
@@ -132,57 +118,34 @@ impl Chip8 {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn reginfo(&self) {
-        print!("PC = {:04X}\nINSTRUCTION = {:04X}\nI = {:04X}\nSP = {}\n",
-               self.pc,
-               (self.memory[self.pc as usize] as u16) << 8 |
-               self.memory[(self.pc + 1) as usize] as u16,
-               self.I,
-               self.sp);
-        for i in 0..16 {
-            print!("V[0x{:02X}] = 0x{:02X}{}",
-                   i,
-                   self.V[i],
-                   if (i + 1) % 4 == 0 {
-                       "\n"
-                   } else {
-                       "\t"
-                   });
-        }
-        print!("\n");
-    }
-
-    #[allow(dead_code)]
-    pub fn dumpgfx(&self) {
-        println!("▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁");
-        for y in 0..32 {
-            print!("|");
-            for x in 0..64 {
-                print!("{}",
-                       if self.gfx[x + (y * 64)] {
-                           "█"
-                       } else {
-                           "░"
-                       });
-            }
-            println!("|");
-        }
-        println!("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔");
-    }
-
     pub fn step(&mut self) {
         // fetch
         let op = (self.memory[self.pc as usize] as u16) << 8 |
                  self.memory[(self.pc + 1) as usize] as u16;
+        // println!("{:04X}: 0x{:04X}", self.pc, op);
 
         // decode and execute
         match op & 0xF000 {
             0x0000 => {
                 match op {
+                    0x00C0...0x00CF => {
+                        // scroll down N lines
+                        let lines = (op & 0x000F) as usize;
+                        let (width, _) = self.screen_dimens();
+                        unsafe {
+                            //copy memory lines down
+                            ptr::copy(self.gfx.as_ptr(),
+                                      self.gfx.as_mut_ptr().offset((width * lines) as isize),
+                                      8192 - (width * lines));
+                            //zero out old memory
+                            ptr::write_bytes::<bool>(self.gfx.as_mut_ptr(), 0, width * lines);
+                        }
+                        self.draw_flag = true;
+                        self.pc += 2;
+                    }
                     0x00E0 => {
                         // clear the screen
-                        self.gfx = [false; 2048];
+                        self.gfx = [false; 8192];
                         self.draw_flag = true;
                         self.pc += 2;
                     }
@@ -190,6 +153,58 @@ impl Chip8 {
                         // return from function
                         self.pc = self.stack[self.sp as usize] + 2;
                         self.sp += 1;
+                    }
+                    0x00FB => {
+                        // scroll 4 pixels right
+                        let (width, height) = self.screen_dimens();
+                        let scroll = if self.extended_mode {
+                            4
+                        } else {
+                            2
+                        };
+                        unsafe {
+                            for i in (0..height).rev() {
+                                ptr::copy(&self.gfx[width * i],
+                                          &mut self.gfx[(width * i) + scroll],
+                                          width - scroll);
+                                ptr::write_bytes::<bool>(&mut self.gfx[width * i], 0, scroll)
+                            }
+                        }
+                        self.draw_flag = true;
+                        self.pc += 2;
+                    }
+                    0x00FC => {
+                        // scroll 4 pixels left
+                        let (width, height) = self.screen_dimens();
+                        let scroll = if self.extended_mode {
+                            4
+                        } else {
+                            2
+                        };
+                        unsafe {
+                            for i in 0..height {
+                                ptr::copy(&self.gfx[(width * i) + scroll],
+                                          &mut self.gfx[width * i],
+                                          width - scroll);
+                                ptr::write_bytes::<bool>(&mut self.gfx[(width * i) + width - scroll], 0, scroll)
+                            }
+                        }
+                        self.draw_flag = true;
+                        self.pc += 2;
+                    },
+                    0x00FD => {
+                        // exit interpreter
+                        // just hang
+                    },
+                    0x00FE => {
+                        // disable extended screen mode
+                        self.extended_mode = false;
+                        self.pc += 2;
+                    }
+                    0x00FF => {
+                        // enable extended screen mode
+                        self.extended_mode = true;
+                        self.pc += 2;
                     }
                     _ => self.unknown_opcode_panic(),
                 }
@@ -235,14 +250,7 @@ impl Chip8 {
             }
             0x7000 => {
                 // adds NN to VX
-                let reg = op.x();
-                let (x, carry) = self.V[reg].overflowing_add(op.low_byte());
-                self.V[reg] = x;
-                self.V[15] = if carry {
-                    1
-                } else {
-                    0
-                };
+                self.V[op.x()] = self.V[op.x()].wrapping_add(op.low_byte());
                 self.pc += 2;
             }
             0x8000 => {
@@ -335,18 +343,31 @@ impl Chip8 {
                 // Sprites are 8 bits wide. Wraps around the screen. If drawing clears a pixel,
                 // VF is set to TRUE.
                 // Draws at position VX, VY, N rows high
-                let x = self.V[op.x()] as u32;
-                let y = self.V[op.y()] as u32;
-                let h = (op & 0x000F) as u32;
-                let mut p: u8;
+                let (width, height) = self.screen_dimens();
+                let x = self.V[op.x()] as usize;
+                let y = self.V[op.y()] as usize;
+                let h = (op & 0x000F) as usize;
                 let mut flag = false;
 
                 self.V[15] = 0;
-                for yline in 0..h {
-                    p = self.memory[(self.I as u32 + yline) as usize];
-                    for xline in 0..8 {
-                        let pos = ((x + xline + ((y + yline) * 64)) % 2048) as usize;
-                        if (p & (0x80 >> xline)) != 0 {
+                for yline in 0..(if h == 0 {
+                    16
+                } else {
+                    h
+                }) {
+                    let widex = h == 0 && self.extended_mode;
+                    let (p, shift) = if widex {
+                        (((self.memory[self.I as usize + yline] as u16) << 8) + self.memory[self.I as usize + yline + 1] as u16, 32768)
+                    } else {
+                        (self.memory[self.I as usize + yline] as u16, 0b1000_0000)
+                    };
+                    for xline in 0..(if widex {
+                        16
+                    } else {
+                        8
+                    }) {
+                        let pos = ((x + xline) % width) + (((y + yline) % height) * width);
+                        if (p & (shift >> xline)) != 0 {
                             if !flag && self.gfx[pos] {
                                 self.V[15] = 1;
                                 flag = true;
@@ -421,7 +442,12 @@ impl Chip8 {
                     }
                     0xF029 => {
                         // sets I to the location of the sprite for the character in VX
-                        self.I = self.V[op.x()] as u16 * 0x5;
+                        self.I = self.V[op.x()] as u16 * 5;
+                        self.pc += 2;
+                    }
+                    0xF030 => {
+                        // sets I to the location of the SCHIP8 sprite for the character in VX
+                        self.I = (self.V[op.x()] as u16 * 10) + 80;
                         self.pc += 2;
                     }
                     0xF033 => {
@@ -438,7 +464,8 @@ impl Chip8 {
                         for i in 0..op.x() + 1 {
                             self.memory[self.I as usize + i] = self.V[i];
                         }
-                        self.I += op.x() as u16 + 1; //happens on the original emulator, on current ones supposedly unchanged
+                        /* Next line breaks SCStars, but I don't know what not having it breaks. */
+                        // self.I += op.x() as u16 + 1; //happens on the original emulator, on current ones supposedly unchanged
                         self.pc += 2;
                     }
                     0xF065 => {
@@ -446,7 +473,22 @@ impl Chip8 {
                         for i in 0..op.x() + 1 {
                             self.V[i] = self.memory[self.I as usize + i];
                         }
-                        self.I += op.x() as u16 + 1; //happens on the original emulator, on current ones supposedly unchanged
+                        /* Next line breaks SCStars, but I don't know what not having it breaks. */
+                        // self.I += op.x() as u16 + 1; //happens on the original emulator, on current ones supposedly unchanged
+                        self.pc += 2;
+                    },
+                    0xF075 => {
+                        //store V0 to VX in user flags
+                        for i in 0..op.x() + 1 {
+                            self.user_flags[i] = self.V[i];
+                        }
+                        self.pc += 2;
+                    },
+                    0xF085 => {
+                        // fill V0 to VX from user flags
+                        for i in 0..op.x() + 1 {
+                            self.V[i] = self.user_flags[i];
+                        }
                         self.pc += 2;
                     }
                     _ => self.unknown_opcode_panic(),
@@ -469,6 +511,48 @@ impl Chip8 {
         self.key[key as usize] = pressed;
     }
 
+
+    // Debugging methods
+
+    #[allow(dead_code)]
+    pub fn reginfo(&self) {
+        print!("PC = {:04X}\nINSTRUCTION = {:04X}\nI = {:04X}\nSP = {}\n",
+               self.pc,
+               (self.memory[self.pc as usize] as u16) << 8 |
+               self.memory[(self.pc + 1) as usize] as u16,
+               self.I,
+               self.sp);
+        for i in 0..16 {
+            print!("V[0x{:02X}] = 0x{:02X}{}",
+                   i,
+                   self.V[i],
+                   if (i + 1) % 4 == 0 {
+                       "\n"
+                   } else {
+                       "\t"
+                   });
+        }
+        print!("\n");
+    }
+
+    #[allow(dead_code)]
+    pub fn dumpgfx(&self) {
+        println!("▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁");
+        for y in 0..32 {
+            print!("|");
+            for x in 0..64 {
+                print!("{}",
+                       if self.gfx[x + (y * 64)] {
+                           "█"
+                       } else {
+                           "░"
+                       });
+            }
+            println!("|");
+        }
+        println!("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔");
+    }
+
     fn unknown_opcode_panic(&mut self) {
         println!("!!PANIC!!\n!!UNKNOWN OPCODE {}!!",
                  ((self.memory[self.pc as usize] as u16) << 8) +
@@ -486,4 +570,55 @@ impl Chip8 {
         }
         panic!("");
     }
+
+    // Utils
+    pub fn screen_dimens(&self) -> (usize, usize) {
+        (if self.extended_mode {
+            (128, 64)
+        } else {
+            (64, 32)
+        })
+    }
  }
+
+pub trait ByteManip {
+    fn high_byte(&self) -> u8;
+    fn low_byte(&self) -> u8;
+    fn nibble(&self, position: u8) -> u8;
+
+    fn x(&self) -> usize; //shorthand for the positions of X and Y register indices in Chip8 opcodes
+    fn y(&self) -> usize;
+    fn nnn(&self) -> u16; //shorthand for NNN memory location pattern in opcodes
+}
+
+impl ByteManip for u16 {
+    fn high_byte(&self) -> u8 {
+        (self >> 8) as u8
+    }
+
+    fn low_byte(&self) -> u8 {
+        (self & 0x00FF) as u8
+    }
+
+    fn nibble(&self, position: u8) -> u8 {
+        match position {
+            1 => (self >> 12) as u8,
+            2 => ((self >> 8) & 0x000F as u16) as u8,
+            3 => ((self >> 4) & 0x000F as u16) as u8,
+            4 => (self & 0x000F as u16) as u8,
+            _ => panic!("Out of range nibble position {}", position),
+        }
+    }
+
+    fn x(&self) -> usize {
+        self.nibble(2) as usize
+    }
+
+    fn y(&self) -> usize {
+        self.nibble(3) as usize
+    }
+
+    fn nnn(&self) -> u16 {
+        self & 0x0FFF as u16
+    }
+}
