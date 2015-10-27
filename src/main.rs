@@ -27,15 +27,14 @@ docopt!(Args derive Debug, "
 Chip8.
 
 Usage:
-	chip8 <filename> [--speed=<hz>] \
-                             [(--foreground=<color> --background=<color>)]
+	chip8 <filename> [--speed=<hz>] [(--foreground=<color> --background=<color>)] [--no-overdraw]
 
 Options:
-	\
-                             --speed=<hz>
-	--foreground=<color>
-	--background=<color>
-", flag_foreground: Option<String>, flag_background: Option<String>, flag_speed: Option<i32>);
+    --speed=<hz>           Set the emulation clock speed [default: 240].
+	--foreground=<color>   Set the foreground color in hex [default: FFFFFF]
+	--background=<color>   Set the background color in hex [default: 000000]
+    --no-overdraw          Force a redraw for all DYXN instructions. 
+", flag_speed: i32);
 
 fn main() {
     let args: Args = Args::docopt().decode().unwrap_or_else(|e| e.exit());
@@ -51,54 +50,39 @@ fn main() {
 
     let mut app = app::App::init(GlGraphics::new(opengl),
                                  String::from(args.arg_filename.clone()),
-                                 match args.flag_speed {
-                                     Some(clock) => {
-                                         if clock % 60 == 0 {
-                                             clock
-                                         } else {
-                                             panic!("Clock speed {} is not divisible by 60, \
-                                                     desync will occur.",
-                                                    clock);
-                                         }
-                                     }
-                                     None => 120,
+                                 if args.flag_speed % 60 == 0 {
+                                     args.flag_speed
+                                 } else {
+                                     panic!("Clock speed {} is not divisible by 60, desync will \
+                                             occur.",
+                                            args.flag_speed);
                                  },
-                                 match args.flag_foreground {
-                                     Some(color) => {
-                                         if let Some((rgb, a)) =
-                                                read_color::rgb_maybe_a(&mut color.chars()) {
-                                             [rgb[0],
-                                              rgb[1],
-                                              rgb[2],
-                                              if let Some(alpha) = a {
-                                                  alpha
-                                              } else {
-                                                  255
-                                              }]
-                                         } else {
-                                             [255, 255, 255, 255]
-                                         }
-                                     }
-                                     None => [255, 255, 255, 255],
+                                 if let Some((rgb, a)) =
+                                        read_color::rgb_maybe_a(&mut args.flag_foreground.chars()) {
+                                     [rgb[0],
+                                      rgb[1],
+                                      rgb[2],
+                                      if let Some(alpha) = a {
+                                          alpha
+                                      } else {
+                                          255
+                                      }]
+                                 } else {
+                                     [255, 255, 255, 255]
                                  },
-                                 match args.flag_background {
-                                     Some(color) => {
-                                         if let Some((rgb, a)) =
-                                                read_color::rgb_maybe_a(&mut color.chars()) {
-                                             [rgb[0],
-                                              rgb[1],
-                                              rgb[2],
-                                              if let Some(alpha) = a {
-                                                  alpha
-                                              } else {
-                                                  255
-                                              }]
-                                         } else {
-                                             [0, 0, 0, 255]
-                                         }
-                                     }
-                                     None => [0, 0, 0, 255],
-                                 });
+                                 if let Some((rgb, a)) =
+                                        read_color::rgb_maybe_a(&mut args.flag_background.chars()) {
+                                     [rgb[0],
+                                      rgb[1],
+                                      rgb[2],
+                                      if let Some(alpha) = a {
+                                          alpha
+                                      } else {
+                                          255
+                                      }]
+                                 } else {
+                                     [0, 0, 0, 255]
+                                 }, args.flag_no_overdraw);
 
     for e in window.events() {
         if let Some(r) = e.render_args() {

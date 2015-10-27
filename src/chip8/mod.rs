@@ -39,10 +39,11 @@ pub struct Chip8 {
     memory: [u8; 4096],
 
     // graphics memory
-    pub gfx: [bool; 8192],
+    pub gfx: [u8; 8192],
     // when true, update screen. Set by instructions 0x00E0 (clear screen) and
     // 0xDXYN (draw sprite)
     pub draw_flag: bool,
+    pub no_overdraw: bool,
 
     // All registers GP
     // V[0xF] is a carry flag
@@ -80,8 +81,9 @@ impl Chip8 {
     pub fn init() -> Chip8 {
         let mut temp = Chip8 {
             memory: [0; 4096],
-            gfx: [false; 8192],
+            gfx: [0; 8192],
             draw_flag: true,
+            no_overdraw: false,
             V: [0; 16],
             I: 0,
             pc: 0x200,
@@ -132,14 +134,14 @@ impl Chip8 {
                                       self.gfx.as_mut_ptr().offset((width * lines) as isize),
                                       8192 - (width * lines));
                             // zero out old memory
-                            ptr::write_bytes::<bool>(self.gfx.as_mut_ptr(), 0, width * lines);
+                            ptr::write_bytes::<u8>(self.gfx.as_mut_ptr(), 0, width * lines);
                         }
                         self.draw_flag = true;
                         self.pc += 2;
                     }
                     0x00E0 => {
                         // clear the screen
-                        self.gfx = [false; 8192];
+                        self.gfx = [0; 8192];
                         self.draw_flag = true;
                         self.pc += 2;
                     }
@@ -161,7 +163,7 @@ impl Chip8 {
                                 ptr::copy(&self.gfx[width * i],
                                           &mut self.gfx[(width * i) + scroll],
                                           width - scroll);
-                                ptr::write_bytes::<bool>(&mut self.gfx[width * i], 0, scroll)
+                                ptr::write_bytes::<u8>(&mut self.gfx[width * i], 0, scroll)
                             }
                         }
                         self.draw_flag = true;
@@ -180,10 +182,9 @@ impl Chip8 {
                                 ptr::copy(&self.gfx[(width * i) + scroll],
                                           &mut self.gfx[width * i],
                                           width - scroll);
-                                ptr::write_bytes::<bool>(&mut self.gfx[(width * i) + width -
-                                                                       scroll],
-                                                         0,
-                                                         scroll)
+                                ptr::write_bytes::<u8>(&mut self.gfx[(width * i) + width - scroll],
+                                                       0,
+                                                       scroll)
                             }
                         }
                         self.draw_flag = true;
@@ -344,7 +345,7 @@ impl Chip8 {
                 let x = self.V[op.x()] as usize;
                 let y = self.V[op.y()] as usize;
                 let h = (op & 0x000F) as usize;
-                let mut flag = false;
+                let mut all_overdraw = true;
 
                 self.V[15] = 0;
                 for yline in 0..(if h == 0 {
@@ -354,8 +355,8 @@ impl Chip8 {
                 }) {
                     let widex = h == 0 && self.extended_mode;
                     let (p, shift) = if widex {
-                        (((self.memory[self.I as usize + yline] as u16) << 8) +
-                         self.memory[self.I as usize + yline + 1] as u16,
+                        (((self.memory[self.I as usize + (yline * 2)] as u16) << 8) +
+                         self.memory[self.I as usize + (yline * 2) + 1] as u16,
                          32768)
                     } else {
                         (self.memory[self.I as usize + yline] as u16, 0b1000_0000)
@@ -367,16 +368,17 @@ impl Chip8 {
                     }) {
                         let pos = ((x + xline) % width) + (((y + yline) % height) * width);
                         if (p & (shift >> xline)) != 0 {
-                            if !flag && self.gfx[pos] {
+                            if self.gfx[pos] == 255 {
                                 self.V[15] = 1;
-                                flag = true;
+                            } else {
+                                all_overdraw = false;
                             }
-                            self.gfx[pos] ^= true;
+                            self.gfx[pos] ^= 255;
 
                         }
                     }
                 }
-                self.draw_flag = true;
+                self.draw_flag = !all_overdraw || self.no_overdraw;
                 self.pc += 2;
             }
             0xE000 => {
@@ -545,7 +547,7 @@ impl Chip8 {
             print!("|");
             for x in 0..64 {
                 print!("{}",
-                       if self.gfx[x + (y * 64)] {
+                       if self.gfx[x + (y * 64)] == 255 {
                            "█"
                        } else {
                            "░"

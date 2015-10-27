@@ -1,6 +1,6 @@
 use fps_counter::FPSCounter;
 use graphics::*;
-use opengl_graphics::GlGraphics;
+use opengl_graphics::{GlGraphics, Texture};
 use piston::input::*;
 use sound_stream::{CallbackFlags, CallbackResult, SoundStream, Settings, StreamParams};
 use sound_stream::output::NonBlockingStream;
@@ -52,12 +52,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn init(gl: GlGraphics,
-                program_file: String,
-                clock: i32,
-                foreground: [u8; 4],
-                background: [u8; 4])
-                -> App {
+    pub fn init(gl: GlGraphics, program_file: String, clock: i32, foreground: [u8; 4], background: [u8; 4], no_overdraw: bool) -> App {
         let mut temp = App {
             gl: gl,
             c8: Chip8::init(),
@@ -72,6 +67,7 @@ impl App {
             sound: None,
         };
         temp.c8.load_program(program_file);
+        temp.c8.no_overdraw = no_overdraw;
         temp
     }
 
@@ -85,32 +81,24 @@ impl App {
         if self.c8.draw_flag {
             use graphics::*;
 
-            let w = args.width;
-
-            let gfxbuffer = &self.c8.gfx;
             let (memwidth, memheight) = self.c8.screen_dimens();
-            let pixelsize = (w as f64) / (memwidth as f64);
-
-            let foreground = self.foreground_color;
-            let background = self.background_color;
-            let pixel = rectangle::square(0.0, 0.0, pixelsize);
+            let wscale = args.width as f64 / memwidth as f64;
+            let hscale = args.height as f64 / memheight as f64;
+            let fcolor = self.foreground_color;
+            let bcolor = self.background_color;
+            let texture = Texture::from_memory_alpha(&self.c8.gfx,
+                                                     memwidth as u32,
+                                                     memheight as u32)
+                              .unwrap();
 
             self.gl.draw(args.viewport(), |c, gl| {
-                clear(background, gl);
-
-                for y in 0..memheight {
-                    for x in 0..memwidth {
-                        rectangle(if gfxbuffer[((y * memwidth) + x) as usize] {
-                                      foreground
-                                  } else {
-                                      background
-                                  },
-                                  pixel,
-                                  c.transform.trans((x as f64) * pixelsize, (y as f64) * pixelsize),
-                                  gl)
-                    }
-                }
+                clear(bcolor, gl);
+                Image::new_color(fcolor).draw(&texture,
+                                              default_draw_state(),
+                                              c.transform.scale(wscale, hscale),
+                                              gl);
             });
+
             self.c8.draw_flag = false;
         }
         self.lastfps = self.fps_counter.tick();
@@ -154,11 +142,11 @@ impl App {
             self.c8.step();
             self.lasthz = self.clock_counter.tick();
         }
-        // if ((self.lasthz as f64) * 0.05) + (self.lasthz as f64) < (self.clockspeed
-        // as f64) || (self.lasthz as f64) - ((self.lasthz as f64) * 0.05) >
-        // (self.clockspeed as f64) {
-        // 	println!("CPU is out of sync: {}Hz", self.lasthz);
-        // }
+        if ((self.lasthz as f64) * 0.05) + (self.lasthz as f64) < (self.clockspeed
+        as f64) || (self.lasthz as f64) - ((self.lasthz as f64) * 0.05) >
+        (self.clockspeed as f64) {
+        	println!("CPU is out of sync: {}Hz", self.lasthz);
+        }
     }
 
     #[inline]

@@ -1,0 +1,16 @@
+[package]
+name = "chip8"
+version = "0.1.0"
+
+[dependencies]
+rand = "*"
+docopt = "*"
+docopt_macros = "*"
+rustc-serialize = "*"
+piston = "*"
+read_color = "*"
+fps_counter = "*"
+piston2d-graphics = "*"
+pistoncore-sdl2_window = "*"
+piston2d-opengl_graphics = { path = "../opengl_graphics" }
+sound_stream = { path = "../sound_stream" }
