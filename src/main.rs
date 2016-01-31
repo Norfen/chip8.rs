@@ -1,5 +1,4 @@
 #![feature(step_by)]
-#![feature(wrapping)]
 #![feature(plugin)]
 #![plugin(docopt_macros)]
 #[macro_use]
@@ -12,13 +11,15 @@ extern crate fps_counter;
 extern crate read_color;
 extern crate rustc_serialize;
 extern crate docopt;
-extern crate sound_stream;
+extern crate portaudio;
 
 use piston::window::WindowSettings;
 use piston::input::*;
 use piston::event_loop::*;
 use sdl2_window::Sdl2Window;
 use opengl_graphics::{GlGraphics, OpenGL};
+
+use portaudio as pa;
 
 mod chip8;
 mod app;
@@ -40,18 +41,20 @@ fn main() {
     let args: Args = Args::docopt().decode().unwrap_or_else(|e| e.exit());
 
     let opengl = OpenGL::V3_2;
-    let window: Sdl2Window = WindowSettings::new("Chip8.rs", [640, 320])
-                                 .opengl(opengl)
-                                 .exit_on_esc(true)
-                                 .samples(4)
-                                 .vsync(true)
-                                 .build()
-                                 .unwrap();
+    let mut window: Sdl2Window = WindowSettings::new("Chip8.rs", [640, 320])
+                                     .opengl(opengl)
+                                     .exit_on_esc(true)
+                                     .samples(4)
+                                     .vsync(true)
+                                     .build()
+                                     .unwrap();
+
+    let mut pa = pa::PortAudio::new().unwrap();
 
     let mut app = app::App::init(GlGraphics::new(opengl),
                                  String::from(args.arg_filename.clone()),
                                  if args.flag_speed % 60 == 0 {
-                                     args.flag_speed
+                                     args.flag_speed as usize
                                  } else {
                                      panic!("Clock speed {} is not divisible by 60, desync will \
                                              occur.",
@@ -82,9 +85,12 @@ fn main() {
                                       }]
                                  } else {
                                      [0, 0, 0, 255]
-                                 }, args.flag_no_overdraw);
+                                 },
+                                 args.flag_no_overdraw,
+                                 &pa);
 
-    for e in window.events() {
+    let mut events = window.events();
+    while let Some(e) = events.next(&mut window) {
         if let Some(r) = e.render_args() {
             app.render(&r);
         }

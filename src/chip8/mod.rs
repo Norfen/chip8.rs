@@ -2,8 +2,8 @@ extern crate rand;
 
 use std::io::*;
 use std::fs::File;
-use std::num::wrapping::OverflowingOps;
-use std::thread::sleep_ms;
+use std::time::Duration;
+use std::thread::sleep;
 use std::ptr;
 
 #[cfg(test)]
@@ -77,7 +77,6 @@ pub struct Chip8 {
 }
 
 impl Chip8 {
-    // add code here
     pub fn init() -> Chip8 {
         let mut temp = Chip8 {
             memory: [0; 4096],
@@ -568,7 +567,7 @@ impl Chip8 {
                   seconds...\
                   \n-----------------------------------------------------------------------------\
                   ---");
-        sleep_ms(3000);
+        sleep(Duration::new(3, 0));
         for i in (0..4096).step_by(2) {
             let op = ((self.memory[i] as u16) << 8) + self.memory[i + 1] as u16;
             println!("{:04X}: {:04X}", i, op);
@@ -585,7 +584,7 @@ impl Chip8 {
             (64, 32)
         })
     }
- }
+}
 
 pub trait ByteManip {
     fn high_byte(&self) -> u8;

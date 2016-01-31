@@ -1,9 +1,8 @@
 use fps_counter::FPSCounter;
-use graphics::*;
-use opengl_graphics::{GlGraphics, Texture};
+use opengl_graphics::*;
 use piston::input::*;
-use sound_stream::{CallbackFlags, CallbackResult, SoundStream, Settings, StreamParams};
-use sound_stream::output::NonBlockingStream;
+use portaudio as pa;
+use std::sync::mpsc::{channel, Sender};
 
 use chip8::Chip8;
 
@@ -37,7 +36,7 @@ fn square_wave(phase: f64) -> f32 {
     ((phase * ::std::f64::consts::PI * 2.0).sin().signum() * 0.25) as f32
 }
 
-pub struct App {
+pub struct App<'a> {
     gl: GlGraphics,
     c8: Chip8,
     ticker: f64,
@@ -45,14 +44,51 @@ pub struct App {
     clock_counter: FPSCounter,
     lastfps: usize,
     lasthz: usize,
-    clockspeed: i32,
+    clockspeed: usize,
     background_color: RGBA,
     foreground_color: RGBA,
-    sound: Option<NonBlockingStream>,
+    sound: pa::stream::Stream<'a, pa::stream::NonBlocking, pa::stream::Output<f32>>,
+    sound_tx: Sender<bool>,
 }
 
-impl App {
-    pub fn init(gl: GlGraphics, program_file: String, clock: i32, foreground: [u8; 4], background: [u8; 4], no_overdraw: bool) -> App {
+impl<'a> App<'a> {
+    pub fn init(gl: GlGraphics,
+                program_file: String,
+                clock: usize,
+                foreground: [u8; 4],
+                background: [u8; 4],
+                no_overdraw: bool,
+                pa: &'a pa::PortAudio)
+                -> App<'a> {
+        let (tx, rx) = channel();
+        let mut settings = pa.default_output_stream_settings(2, 48000.0, 64).unwrap();
+        settings.flags = pa::stream_flags::CLIP_OFF;
+        let mut phase = 0.0;
+        let mut last_state = false;
+        let mut stream = pa.open_non_blocking_stream(settings, move |pa::OutputStreamCallbackArgs {buffer, frames, ..}| {
+            let play = rx.try_recv().unwrap_or(last_state);
+            let mut idx = 0;
+                if play {
+                println!("playing...");
+                for _ in 0..frames {
+                    let snd = square_wave(phase);
+                    buffer[idx] = snd;
+                    buffer[idx + 1] = snd;
+                    phase += 200.0 / 48000.0;
+                    idx += 2;
+                }
+            } else {
+                for _ in 0..frames {
+                    buffer[idx] = 0.0;
+                    buffer[idx + 1] = 0.0;
+                    idx += 2;
+                }
+            }
+            last_state = play;
+            pa::Continue
+        }).unwrap();
+        stream.start().unwrap();
+
         let mut temp = App {
             gl: gl,
             c8: Chip8::init(),
@@ -60,11 +96,12 @@ impl App {
             fps_counter: FPSCounter::new(),
             clock_counter: FPSCounter::new(),
             lastfps: 0,
-            lasthz: 0,
+            lasthz: clock,
             clockspeed: clock,
             foreground_color: RGBA::from_u8(foreground),
             background_color: RGBA::from_u8(background),
-            sound: None,
+            sound: stream,
+            sound_tx: tx,
         };
         temp.c8.load_program(program_file);
         temp.c8.no_overdraw = no_overdraw;
@@ -110,42 +147,16 @@ impl App {
             self.c8.tick();
             self.ticker -= 1.0 / 60.0;
         }
-        if self.c8.sound_timer > 0 && self.sound.is_none() {
-            let mut timer = self.c8.sound_timer as f64 * (1.0 / 60.0);
-            let mut phase = 0.0;
-            self.sound = Some(SoundStream::new()
-                                  .output(StreamParams::new())
-                                  .run_callback(Box::new(move |output: &mut [f32],
-                                                               settings: Settings,
-                                                               dt: f64,
-                                                               _: CallbackFlags| {
-                                      for frame in output.chunks_mut(settings.channels as usize) {
-                                          let snd = square_wave(phase);
-                                          for channel in frame {
-                                              *channel = snd;
-                                          }
-                                          phase += 200.0 / settings.sample_hz as f64;
-                                      }
-                                      timer -= dt;
-                                      if timer >= 0.0 {
-                                          CallbackResult::Continue
-                                      } else {
-                                          CallbackResult::Complete
-                                      }
-                                  }))
-                                  .unwrap());
-        }
-        if self.sound.as_ref().map_or(false, |s| s.is_active().as_ref().ok() == Some(&false)) {
-            self.sound = None;
-        }
+
+        self.sound_tx.send(self.c8.sound_timer > 0);//.unwrap();
+
         for _ in 0..(((self.clockspeed as f64) * args.dt).round() as usize) {
             self.c8.step();
             self.lasthz = self.clock_counter.tick();
         }
-        if ((self.lasthz as f64) * 0.05) + (self.lasthz as f64) < (self.clockspeed
-        as f64) || (self.lasthz as f64) - ((self.lasthz as f64) * 0.05) >
-        (self.clockspeed as f64) {
-        	println!("CPU is out of sync: {}Hz", self.lasthz);
+        if ((self.lasthz as f64) * 0.05) + (self.lasthz as f64) < (self.clockspeed as f64) ||
+           (self.lasthz as f64) - ((self.lasthz as f64) * 0.05) > (self.clockspeed as f64) {
+            println!("CPU is out of sync: {}Hz", self.lasthz);
         }
     }
 
