@@ -12,5 +12,5 @@ read_color = "*"
 fps_counter = "*"
 piston2d-graphics = "*"
 pistoncore-sdl2_window = "*"
-piston2d-opengl_graphics = "*"
-portaudio = "*"
+piston2d-opengl_graphics = { git = "https://github.com/seeday/opengl_graphics" }
+rodio = "*"

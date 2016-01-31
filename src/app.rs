@@ -1,8 +1,7 @@
 use fps_counter::FPSCounter;
 use opengl_graphics::*;
 use piston::input::*;
-use portaudio as pa;
-use std::sync::mpsc::{channel, Sender};
+use rodio::{self, Source};
 
 use chip8::Chip8;
 
@@ -31,12 +30,7 @@ impl RGBATrait for RGBA {
     }
 }
 
-#[inline]
-fn square_wave(phase: f64) -> f32 {
-    ((phase * ::std::f64::consts::PI * 2.0).sin().signum() * 0.25) as f32
-}
-
-pub struct App<'a> {
+pub struct App {
     gl: GlGraphics,
     c8: Chip8,
     ticker: f64,
@@ -47,47 +41,22 @@ pub struct App<'a> {
     clockspeed: usize,
     background_color: RGBA,
     foreground_color: RGBA,
-    sound: pa::stream::Stream<'a, pa::stream::NonBlocking, pa::stream::Output<f32>>,
-    sound_tx: Sender<bool>,
+    audio: rodio::Sink,
 }
 
-impl<'a> App<'a> {
+impl App {
     pub fn init(gl: GlGraphics,
                 program_file: String,
                 clock: usize,
                 foreground: [u8; 4],
                 background: [u8; 4],
-                no_overdraw: bool,
-                pa: &'a pa::PortAudio)
-                -> App<'a> {
-        let (tx, rx) = channel();
-        let mut settings = pa.default_output_stream_settings(2, 48000.0, 64).unwrap();
-        settings.flags = pa::stream_flags::CLIP_OFF;
-        let mut phase = 0.0;
-        let mut last_state = false;
-        let mut stream = pa.open_non_blocking_stream(settings, move |pa::OutputStreamCallbackArgs {buffer, frames, ..}| {
-            let play = rx.try_recv().unwrap_or(last_state);
-            let mut idx = 0;
-                if play {
-                println!("playing...");
-                for _ in 0..frames {
-                    let snd = square_wave(phase);
-                    buffer[idx] = snd;
-                    buffer[idx + 1] = snd;
-                    phase += 200.0 / 48000.0;
-                    idx += 2;
-                }
-            } else {
-                for _ in 0..frames {
-                    buffer[idx] = 0.0;
-                    buffer[idx + 1] = 0.0;
-                    idx += 2;
-                }
-            }
-            last_state = play;
-            pa::Continue
-        }).unwrap();
-        stream.start().unwrap();
+                no_overdraw: bool)
+                -> App {
+        let source = rodio::source::SineWave::new(400);
+        let endp = rodio::get_endpoints_list().find(|x| x.get_name() == "pulse").unwrap_or(rodio::get_default_endpoint().unwrap());
+        let mut sink = rodio::Sink::new(&endp);
+        sink.set_volume(0.0);
+        sink.append(source.repeat_infinite());
 
         let mut temp = App {
             gl: gl,
@@ -100,8 +69,7 @@ impl<'a> App<'a> {
             clockspeed: clock,
             foreground_color: RGBA::from_u8(foreground),
             background_color: RGBA::from_u8(background),
-            sound: stream,
-            sound_tx: tx,
+            audio: sink,
         };
         temp.c8.load_program(program_file);
         temp.c8.no_overdraw = no_overdraw;
@@ -123,9 +91,13 @@ impl<'a> App<'a> {
             let hscale = args.height as f64 / memheight as f64;
             let fcolor = self.foreground_color;
             let bcolor = self.background_color;
+            let mut tsettings = TextureSettings::new();
+            tsettings.set_min(Filter::Nearest);
+            tsettings.set_mag(Filter::Nearest);
             let texture = Texture::from_memory_alpha(&self.c8.gfx,
                                                      memwidth as u32,
-                                                     memheight as u32)
+                                                     memheight as u32,
+                                                     &tsettings)
                               .unwrap();
 
             self.gl.draw(args.viewport(), |c, gl| {
@@ -143,12 +115,12 @@ impl<'a> App<'a> {
 
     pub fn update(&mut self, args: &UpdateArgs) {
         self.ticker += args.dt;
-        while self.ticker > 1.0 / 60.0 {
+        while self.ticker >= 1.0 / 60.0 {
             self.c8.tick();
             self.ticker -= 1.0 / 60.0;
         }
 
-        self.sound_tx.send(self.c8.sound_timer > 0);//.unwrap();
+        self.audio.set_volume(if self.c8.sound_timer > 0 {1.0} else {0.0});
 
         for _ in 0..(((self.clockspeed as f64) * args.dt).round() as usize) {
             self.c8.step();

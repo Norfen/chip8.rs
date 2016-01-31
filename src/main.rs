@@ -1,5 +1,6 @@
 #![feature(step_by)]
 #![feature(plugin)]
+#![feature(const_fn)]
 #![plugin(docopt_macros)]
 #[macro_use]
 
@@ -11,15 +12,13 @@ extern crate fps_counter;
 extern crate read_color;
 extern crate rustc_serialize;
 extern crate docopt;
-extern crate portaudio;
+extern crate rodio;
 
 use piston::window::WindowSettings;
 use piston::input::*;
 use piston::event_loop::*;
 use sdl2_window::Sdl2Window;
 use opengl_graphics::{GlGraphics, OpenGL};
-
-use portaudio as pa;
 
 mod chip8;
 mod app;
@@ -48,8 +47,6 @@ fn main() {
                                      .vsync(true)
                                      .build()
                                      .unwrap();
-
-    let mut pa = pa::PortAudio::new().unwrap();
 
     let mut app = app::App::init(GlGraphics::new(opengl),
                                  String::from(args.arg_filename.clone()),
@@ -86,9 +83,9 @@ fn main() {
                                  } else {
                                      [0, 0, 0, 255]
                                  },
-                                 args.flag_no_overdraw,
-                                 &pa);
+                                 args.flag_no_overdraw);
 
+        
     let mut events = window.events();
     while let Some(e) = events.next(&mut window) {
         if let Some(r) = e.render_args() {
